@@ -1,0 +1,118 @@
+name: Build & Release APK
+
+on:
+  push:
+    branches: [ main, master ]
+  pull_request:
+    branches: [ main, master ]
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        include:
+          - arch: "arm64-v8a"
+            abi: "arm64"
+          - arch: "armeabi-v7a"
+            abi: "armv7"
+          - arch: "x86_64"
+            abi: "x86_64"
+
+    steps:
+    - uses: actions/checkout@v4
+
+    - name: Set up JDK 17
+      uses: actions/setup-java@v4
+      with:
+        java-version: '17'
+        distribution: 'temurin'
+        cache: gradle
+
+    - name: Setup Android SDK
+      uses: android-actions/setup-android@v3
+
+    - name: Install NDK
+      run: |
+        sdkmanager "ndk;26.1.10909125"
+
+    - name: Setup Rust
+      uses: dtolnay/rust-toolchain@stable
+      with:
+        targets: aarch64-linux-android,armv7-linux-androideabi,x86_64-linux-android
+
+    - name: Install Cargo NDK
+      run: cargo install cargo-ndk
+
+    - name: Build Rust library for ${{ matrix.arch }}
+      run: |
+        cd rust
+        cargo ndk -t ${{ matrix.arch }} build --release
+        cd ..
+
+    - name: Build APK
+      run: |
+        chmod +x gradlew
+        ./gradlew assembleRelease \
+          -Dorg.gradle.java.home=${{ env.JAVA_HOME }} \
+          -Pandroid.ndk.version=26.1.10909125
+
+    - name: Sign APK
+      run: |
+        if [ -f "${{ secrets.KEYSTORE_FILE }}" ]; then
+          jarsigner -verbose -sigalg SHA1withRSA -digestalg SHA1 \
+            -keystore "${{ secrets.KEYSTORE_FILE }}" \
+            -storepass "${{ secrets.KEYSTORE_PASSWORD }}" \
+            -keypass "${{ secrets.KEY_PASSWORD }}" \
+            app/build/outputs/apk/release/app-release-unsigned.apk \
+            "${{ secrets.KEY_ALIAS }}"
+        fi
+
+    - name: Rename APK
+      run: |
+        mv app/build/outputs/apk/release/app-release-unsigned.apk \
+           app/build/outputs/apk/release/tor-x-${{ matrix.abi }}.apk
+
+    - name: Upload APK
+      uses: actions/upload-artifact@v3
+      with:
+        name: apk-${{ matrix.arch }}
+        path: app/build/outputs/apk/release/*.apk
+
+  release:
+    needs: build
+    runs-on: ubuntu-latest
+    if: github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master'
+
+    steps:
+    - uses: actions/checkout@v4
+
+    - name: Download all artifacts
+      uses: actions/download-artifact@v3
+      with:
+        path: apks/
+
+    - name: Create Release
+      uses: softprops/action-gh-release@v1
+      with:
+        files: |
+          apks/apk-arm64-v8a/*.apk
+          apks/apk-armeabi-v7a/*.apk
+          apks/apk-x86_64/*.apk
+        tag_name: v${{ github.run_number }}
+        generate_release_notes: true
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+    - name: Create Universal APK
+      run: |
+        cd apks
+        zip -r tor-x-universal-v${{ github.run_number }}.apk */*.apk
+        cd ..
+
+    - name: Upload Universal APK
+      uses: softprops/action-gh-release@v1
+      with:
+        files: apks/tor-x-universal-*.apk
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

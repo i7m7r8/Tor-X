@@ -1,0 +1,42 @@
+# Gradle
+.gradle/
+build/
+*.apk
+*.aar
+*.jks
+local.properties
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+.DS_Store
+*.iml
+
+# Rust
+rust/target/
+Cargo.lock
+**/*.rs.bk
+
+# Android
+.android/
+bin/
+gen/
+proguard/
+
+# Java
+*.class
+*.jar
+*.war
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Environment
+.env
+.env.local
+secrets.json
